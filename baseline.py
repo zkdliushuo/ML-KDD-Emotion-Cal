@@ -10,47 +10,60 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torch.utils.data import DataLoader
-from torch.utils.data.dataset import Dataset
+from torch.utils.data.dataset import Dataalbert_chinese_baseset
 from transformers import BertPreTrainedModel, BertTokenizer, BertConfig, BertModel, AutoConfig
 from functools import partial
 from transformers import AdamW, get_linear_schedule_with_warmup
 
+import argparse
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 
-with open('data/train_dataset_v2.tsv', 'r', encoding='utf-8') as handler:
-    lines = handler.read().split('\n')[1:-1]
+PRETRAINED_MODEL_LIST = ['hfl/chinese-roberta-wwm-ext', 'voidful/', 'bert-base-chinese', 'hfl/chinese-macbert-base', 'nghuyong/ernie-1.0']
 
-    data = list()
-    for line in tqdm(lines):
-        sp = line.split('\t')
-        if len(sp) != 4:
-            print("Error: ", sp)
-            continue
-        data.append(sp)
+parser = argparse.ArgumentParser()
+parser.add_argument('--regenerate_data', action="store_true", default=False)
+parser.add_argument('--bert_id', type=int, default=0, help="0 is roberta, 1 is ernie, 2 is base.")
+args = parser.parse_args()
 
-train = pd.DataFrame(data)
-train.columns = ['id', 'content', 'character', 'emotions']
+# os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 
-test = pd.read_csv('data/test_dataset.tsv', sep='\t')
-submit = pd.read_csv('data/submit_example.tsv', sep='\t')
-train = train[train['emotions'] != '']
+if args.regenerate_data or ( not os.path.exists('data/train.csv') or not os.path.exists('data/test.csv')):
+    print("########################### [ process train and test data and store them in csv format ] ###########################")
+    with open('data/train_dataset_v2.tsv', 'r', encoding='utf-8') as handler:
+        lines = handler.read().split('\n')[1:-1]
 
-train['text'] = train[ 'content'].astype(str)  +'角色: ' + train['character'].astype(str)
-test['text'] = test['content'].astype(str) + ' 角色: ' + test['character'].astype(str)
+        data = list()
+        for line in tqdm(lines):
+            sp = line.split('\t')
+            if len(sp) != 4:
+                print("Error: ", sp)
+                continue
+            data.append(sp)
 
-train['emotions'] = train['emotions'].apply(lambda x: [int(_i) for _i in x.split(',')])
+    train = pd.DataFrame(data)
+    train.columns = ['id', 'content', 'character', 'emotions']
 
-train[['love', 'joy', 'fright', 'anger', 'fear', 'sorrow']] = train['emotions'].values.tolist()
-test[['love', 'joy', 'fright', 'anger', 'fear', 'sorrow']] =[0,0,0,0,0,0]
+    test = pd.read_csv('data/test_dataset.tsv', sep='\t')
+    submit = pd.read_csv('data/submit_example.tsv', sep='\t')
+    train = train[train['emotions'] != '']
 
-train.to_csv('data/train.csv',columns=['id', 'content', 'character','text','love', 'joy', 'fright', 'anger', 'fear', 'sorrow'],
-            sep='\t',
-            index=False)
 
-test.to_csv('data/test.csv',columns=['id', 'content', 'character','text','love', 'joy', 'fright', 'anger', 'fear', 'sorrow'],
-            sep='\t',
-            index=False)
+
+    train['text'] = train[ 'content'].astype(str)  +'角色: ' + train['character'].astype(str)
+    test['text'] = test['content'].astype(str) + ' 角色: ' + test['character'].astype(str)
+
+    train['emotions'] = train['emotions'].apply(lambda x: [int(_i) for _i in x.split(',')])
+
+    train[['love', 'joy', 'fright', 'anger', 'fear', 'sorrow']] = train['emotions'].values.tolist()
+    test[['love', 'joy', 'fright', 'anger', 'fear', 'sorrow']] =[0,0,0,0,0,0]
+
+    train.to_csv('data/train.csv',columns=['id', 'content', 'character','text','love', 'joy', 'fright', 'anger', 'fear', 'sorrow'],
+                sep='\t',
+                index=False)
+
+    test.to_csv('data/test.csv',columns=['id', 'content', 'character','text','love', 'joy', 'fright', 'anger', 'fear', 'sorrow'],
+                sep='\t',
+                index=False)
 
 target_cols=['love', 'joy', 'fright', 'anger', 'fear', 'sorrow']
 class RoleDataset(Dataset):
@@ -90,6 +103,10 @@ class RoleDataset(Dataset):
     def __len__(self):
         return len(self.texts)
     
+class myDataLoader:
+    def __init__(self, dataset) -> None:
+        self.dataset = dataset 
+    
 def create_dataloader(dataset, batch_size, mode='train'):
     shuffle = True if mode == 'train' else False
 
@@ -100,7 +117,8 @@ def create_dataloader(dataset, batch_size, mode='train'):
     return data_loader
 
 # roberta
-PRE_TRAINED_MODEL_NAME='hfl/chinese-roberta-wwm-ext'  # 'hfl/chinese-roberta-wwm-ext'
+# PRE_TRAINED_MODEL_NAME='hfl/chinese-roberta-wwm-ext'  # 'hfl/chinese-roberta-wwm-ext'
+PRE_TRAINED_MODEL_NAME = PRETRAINED_MODEL_LIST[args.bert_id]
 tokenizer = BertTokenizer.from_pretrained(PRE_TRAINED_MODEL_NAME)
 base_model = BertModel.from_pretrained(PRE_TRAINED_MODEL_NAME)  # 加载预训练模型
 # model = ppnlp.transformers.BertForSequenceClassification.from_pretrained(MODEL_NAME, num_classes=2)
@@ -209,6 +227,7 @@ scheduler = get_linear_schedule_with_warmup(
   num_training_steps=total_steps
 )
 
+# criterion = nn.MSELoss().cuda()
 criterion = nn.BCEWithLogitsLoss().cuda()
 
 def do_train(model, date_loader, criterion, optimizer, scheduler, metric=None):
