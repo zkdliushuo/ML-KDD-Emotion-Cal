@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torch.utils.data import DataLoader
-from torch.utils.data.dataset import Dataalbert_chinese_baseset
+from torch.utils.data.dataset import Dataset
 from transformers import BertPreTrainedModel, BertTokenizer, BertConfig, BertModel, AutoConfig
 from functools import partial
 from transformers import AdamW, get_linear_schedule_with_warmup
@@ -18,11 +18,12 @@ from transformers import AdamW, get_linear_schedule_with_warmup
 import argparse
 import os
 
-PRETRAINED_MODEL_LIST = ['hfl/chinese-roberta-wwm-ext', 'voidful/', 'bert-base-chinese', 'hfl/chinese-macbert-base', 'nghuyong/ernie-1.0']
+PRETRAINED_MODEL_LIST = ['hfl/chinese-roberta-wwm-ext-large', 'voidful/albert_chinese_base', 'bert-base-chinese', 'hfl/chinese-macbert-base', 'nghuyong/ernie-1.0']
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--regenerate_data', action="store_true", default=False)
 parser.add_argument('--bert_id', type=int, default=0, help="0 is roberta, 1 is ernie, 2 is base.")
+parser.add_argument('--validation', action="store_true", default=False)
 args = parser.parse_args()
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = '3'
@@ -47,10 +48,15 @@ if args.regenerate_data or ( not os.path.exists('data/train.csv') or not os.path
     submit = pd.read_csv('data/submit_example.tsv', sep='\t')
     train = train[train['emotions'] != '']
 
+    train_scipts = train['id'].apply(lambda x: x.split('_')[0])
+    train_scene = train['id'].apply(lambda x: x.split('_')[1])
+    train_sentence = train['id'].apply(lambda x: x.split('_')[3])
+    test_scipts = test['id'].apply(lambda x: x.split('_')[0])
+    test_scene = test['id'].apply(lambda x: x.split('_')[1])
+    test_sentence = test['id'].apply(lambda x: x.split('_')[3])
 
-
-    train['text'] = train[ 'content'].astype(str)  +'角色: ' + train['character'].astype(str)
-    test['text'] = test['content'].astype(str) + ' 角色: ' + test['character'].astype(str)
+    train['text'] = train[ 'content'].astype(str)  +'角色: ' + train['character'].astype(str)  + ';剧本编号: '+train_scipts.astype(str) + ';场景编号: '+train_scene.astype(str) + ';台词编号: '+train_sentence.astype(str)
+    test['text'] = test['content'].astype(str) + ' 角色: ' + test['character'].astype(str) + ';剧本编号: '+test_scipts.astype(str) + ';场景编号: '+test_scene.astype(str) + ';台词编号: '+test_sentence.astype(str)
 
     train['emotions'] = train['emotions'].apply(lambda x: [int(_i) for _i in x.split(',')])
 
@@ -194,11 +200,11 @@ class IQIYModelLite(nn.Module):
             'anger': anger, 'fear': fear, 'sorrow': sorrow,
         }
         
-EPOCHS=2
+EPOCHS=3
 weight_decay=0.0
 data_path='data'
-warmup_proportion=0.0
-batch_size=16
+warmup_proportion=0.01
+batch_size=48
 lr = 1e-5
 max_len = 128
 
