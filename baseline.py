@@ -1,5 +1,6 @@
 from tqdm import tqdm 
 import pandas as pd
+import csv
 import os
 from functools import partial
 import numpy as np
@@ -24,50 +25,44 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--regenerate_data', action="store_true", default=False)
 parser.add_argument('--bert_id', type=int, default=0, help="0 is roberta, 1 is ernie, 2 is base.")
 parser.add_argument('--validation', action="store_true", default=False)
+parser.add_argument('--no_train', action="store_true", default=False)
 args = parser.parse_args()
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 
 if args.regenerate_data or ( not os.path.exists('data/train.csv') or not os.path.exists('data/test.csv')):
     print("########################### [ process train and test data and store them in csv format ] ###########################")
-    with open('data/train_dataset_v2.tsv', 'r', encoding='utf-8') as handler:
+    with open('data/train_final.tsv', 'r', encoding='utf-8') as handler:
         lines = handler.read().split('\n')[1:-1]
 
         data = list()
         for line in tqdm(lines):
             sp = line.split('\t')
-            if len(sp) != 4:
+            if len(sp) != 3:
                 print("Error: ", sp)
                 continue
             data.append(sp)
 
     train = pd.DataFrame(data)
-    train.columns = ['id', 'content', 'character', 'emotions']
+    train.columns = ['id', 'content', 'emotions']
 
-    test = pd.read_csv('data/test_dataset.tsv', sep='\t')
+    test = pd.read_csv('data/test_final.tsv', sep='\t')
     submit = pd.read_csv('data/submit_example.tsv', sep='\t')
     train = train[train['emotions'] != '']
 
-    train_scipts = train['id'].apply(lambda x: x.split('_')[0])
-    train_scene = train['id'].apply(lambda x: x.split('_')[1])
-    train_sentence = train['id'].apply(lambda x: x.split('_')[3])
-    test_scipts = test['id'].apply(lambda x: x.split('_')[0])
-    test_scene = test['id'].apply(lambda x: x.split('_')[1])
-    test_sentence = test['id'].apply(lambda x: x.split('_')[3])
-
-    train['text'] = train[ 'content'].astype(str)  +'角色: ' + train['character'].astype(str)  + ';剧本编号: '+train_scipts.astype(str) + ';场景编号: '+train_scene.astype(str) + ';台词编号: '+train_sentence.astype(str)
-    test['text'] = test['content'].astype(str) + ' 角色: ' + test['character'].astype(str) + ';剧本编号: '+test_scipts.astype(str) + ';场景编号: '+test_scene.astype(str) + ';台词编号: '+test_sentence.astype(str)
+    train['text'] = train[ 'content'].astype(str)
+    test['text'] = test['content'].astype(str)
 
     train['emotions'] = train['emotions'].apply(lambda x: [int(_i) for _i in x.split(',')])
 
     train[['love', 'joy', 'fright', 'anger', 'fear', 'sorrow']] = train['emotions'].values.tolist()
     test[['love', 'joy', 'fright', 'anger', 'fear', 'sorrow']] =[0,0,0,0,0,0]
 
-    train.to_csv('data/train.csv',columns=['id', 'content', 'character','text','love', 'joy', 'fright', 'anger', 'fear', 'sorrow'],
+    train.to_csv('data/train.csv',columns=['id','text','love', 'joy', 'fright', 'anger', 'fear', 'sorrow'],
                 sep='\t',
                 index=False)
 
-    test.to_csv('data/test.csv',columns=['id', 'content', 'character','text','love', 'joy', 'fright', 'anger', 'fear', 'sorrow'],
+    test.to_csv('data/test.csv',columns=['id','text','love', 'joy', 'fright', 'anger', 'fear', 'sorrow'],
                 sep='\t',
                 index=False)
 
@@ -76,9 +71,15 @@ class RoleDataset(Dataset):
     def __init__(self, tokenizer, max_len, mode='train'):
         super(RoleDataset, self).__init__()
         if mode == 'train':
-            self.data = pd.read_csv('data/train.csv',sep='\t')
+            self.data = pd.read_csv('data/train.csv',sep='\t', quoting=csv.QUOTE_NONE)
         else:
-            self.data = pd.read_csv('data/test.csv',sep='\t')
+            self.data = pd.read_csv('data/test.csv',sep='\t', quoting=csv.QUOTE_NONE)
+
+            # dataframe = pd.DataFrame(self.data['text'].tolist(), columns=['text'])
+            # dataframe.to_csv('data/debug1.csv', columns=['text'],
+            #         sep='\t',
+            #         index=False)
+
         self.texts=self.data['text'].tolist()
         self.labels=self.data[target_cols].to_dict('records')
         self.tokenizer = tokenizer
@@ -108,10 +109,6 @@ class RoleDataset(Dataset):
 
     def __len__(self):
         return len(self.texts)
-    
-class myDataLoader:
-    def __init__(self, dataset) -> None:
-        self.dataset = dataset 
     
 def create_dataloader(dataset, batch_size, mode='train'):
     shuffle = True if mode == 'train' else False
@@ -147,7 +144,7 @@ class IQIYModelLite(nn.Module):
         self.base = BertModel.from_pretrained(model_name, config=config)
 
         dim = 1024 if 'large' in model_name else 768
-
+        
         self.attention = nn.Sequential(
             nn.Linear(dim, 512),
             nn.Tanh(),
@@ -204,16 +201,18 @@ EPOCHS=3
 weight_decay=0.0
 data_path='data'
 warmup_proportion=0.01
-batch_size=48
+batch_size=16
 lr = 1e-5
-max_len = 128
+max_len = 350
 
 warm_up_ratio = 0
 
 trainset = RoleDataset(tokenizer, max_len, mode='train')
+print(len(trainset))
 train_loader = create_dataloader(trainset, batch_size, mode='train')
 
 valset = RoleDataset(tokenizer, max_len, mode='test')
+print(len(valset))
 valid_loader = create_dataloader(valset, batch_size, mode='test')
 
 model = IQIYModelLite(n_classes=1, model_name=PRE_TRAINED_MODEL_NAME)
@@ -272,26 +271,23 @@ def do_train(model, date_loader, criterion, optimizer, scheduler, metric=None):
                 print("global step %d, epoch: %d, batch: %d, loss: %.5f, speed: %.2f step/s, lr: %.10f"
                       % (global_step, epoch, step, np.mean(losses), global_step / (time.time() - tic_train), 
                          float(scheduler.get_last_lr()[0])))
+        state = {
+            'state': model.state_dict(),
+            'epoch': epoch
+        }
+        torch.save(state, './ckpt/iqiyi_model_{}.ckpt'.format(str(epoch)))
+
+if args.no_train:
+    checkpoint = torch.load('./ckpt/iqiyi_model_2.ckpt')
+    model.load_state_dict(checkpoint['state']) 
+else:
+    do_train(model, train_loader, criterion, optimizer, scheduler)
 
 
-do_train(model, train_loader, criterion, optimizer, scheduler)
 
 from collections import defaultdict
 
 model.eval()
-
-test_pred = defaultdict(list)
-for step, batch in tqdm(enumerate(valid_loader)):
-    b_input_ids = batch['input_ids'].cuda()
-    attention_mask = batch["attention_mask"].cuda()
-    with torch.no_grad():
-        logists = model(input_ids=b_input_ids, attention_mask=attention_mask)
-        for col in target_cols:
-            out2 = logists[col].sigmoid().squeeze(1)*3.0
-            test_pred[col].append(out2.cpu().numpy())
-
-    print(test_pred)
-    break
 
 def predict(model, test_loader):
     val_loss = 0

@@ -1,7 +1,7 @@
 # 运行
 运行一个脚本示例如下
 ```
-CUDA_VISIBLE_DEVICES=1 python baseline.py --bert_id 1
+CUDA_VISIBLE_DEVICES=1 python baseline.py --bert_id 1 
 ```
 不同的bert_id指定选择不同的tokenizer的ckpt版本，可以参考[baseline.py](./baseline.py#L21)查看id对应的ckpt
 
